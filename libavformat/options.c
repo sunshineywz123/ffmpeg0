@@ -101,6 +101,7 @@ static const AVClass av_format_context_class = {
 
 static void avformat_get_context_defaults(AVFormatContext *s)
 {
+	//首先调用memset()将AVFormatContext的所有字段置0
     memset(s, 0, sizeof(AVFormatContext));
 
     s->av_class = &av_format_context_class;
@@ -111,10 +112,13 @@ static void avformat_get_context_defaults(AVFormatContext *s)
 AVFormatContext *avformat_alloc_context(void)
 {
     AVFormatContext *ic;
+	//调用av_malloc()为AVFormatContext结构体分配了内存
     ic = av_malloc(sizeof(AVFormatContext));
     if (!ic) return ic;
+	//avformat_get_context_defaults()函数
+	//该函数用于设置AVFormatContext的字段的默认值
     avformat_get_context_defaults(ic);
-
+	//而且同时也给AVFormatContext中的internal字段分配内存
     ic->internal = av_mallocz(sizeof(*ic->internal));
     if (!ic->internal) {
         avformat_free_context(ic);

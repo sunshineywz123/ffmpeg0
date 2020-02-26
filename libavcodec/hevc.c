@@ -2296,10 +2296,11 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
     lc->ctb_up_right_flag = ((y_ctb > 0)  && (ctb_addr_in_slice+1 >= s->ps.sps->ctb_width) && (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs+1 - s->ps.sps->ctb_width]]));
     lc->ctb_up_left_flag = ((x_ctb > 0) && (y_ctb > 0)  && (ctb_addr_in_slice-1 >= s->ps.sps->ctb_width) && (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs-1 - s->ps.sps->ctb_width]]));
 }
-
+//解码入口函数
 static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 {
     HEVCContext *s  = avctxt->priv_data;
+	//CTB尺寸
     int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
     int more_data   = 1;
     int x_ctb       = 0;
@@ -2360,7 +2361,7 @@ static int hls_slice_data(HEVCContext *s)
 
     arg[0] = 0;
     arg[1] = 1;
-
+    //解码入口函数
     s->avctx->execute(s->avctx, hls_decode_entry, arg, ret , 1, sizeof(int));
     return ret[0];
 }
@@ -2655,23 +2656,27 @@ static int decode_nal_unit(HEVCContext *s, const HEVCNAL *nal)
 
     switch (s->nal_unit_type) {
     case NAL_VPS:
+	//解析VPS
         ret = ff_hevc_decode_nal_vps(gb, s->avctx, &s->ps);
         if (ret < 0)
             goto fail;
         break;
     case NAL_SPS:
+	//解析SPS
         ret = ff_hevc_decode_nal_sps(gb, s->avctx, &s->ps,
                                      s->apply_defdispwin);
         if (ret < 0)
             goto fail;
         break;
     case NAL_PPS:
+	//解析PPS
         ret = ff_hevc_decode_nal_pps(gb, s->avctx, &s->ps);
         if (ret < 0)
             goto fail;
         break;
     case NAL_SEI_PREFIX:
     case NAL_SEI_SUFFIX:
+	//解析SEI
         ret = ff_hevc_decode_nal_sei(s);
         if (ret < 0)
             goto fail;
@@ -2692,6 +2697,8 @@ static int decode_nal_unit(HEVCContext *s, const HEVCNAL *nal)
     case NAL_RADL_R:
     case NAL_RASL_N:
     case NAL_RASL_R:
+	//解析Slice
+    	//解析Slice Header
         ret = hls_slice_header(s);
         if (ret < 0)
             return ret;
@@ -2751,6 +2758,7 @@ static int decode_nal_unit(HEVCContext *s, const HEVCNAL *nal)
             if (ret < 0)
                 goto fail;
         } else {
+        	//解码 Slice Data
             if (s->threads_number > 1 && s->sh.num_entry_point_offsets > 0)
                 ctb_addr_ts = hls_slice_data_wpp(s, nal);
             else
@@ -2785,6 +2793,7 @@ fail:
     return 0;
 }
 
+//解码一帧数据
 static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
 {
     int i, ret = 0;
@@ -2811,6 +2820,7 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
 
     /* decode the NAL units */
     for (i = 0; i < s->pkt.nb_nals; i++) {
+	//解码NALU
         ret = decode_nal_unit(s, &s->pkt.nals[i]);
         if (ret < 0) {
             av_log(s->avctx, AV_LOG_WARNING,
@@ -2898,14 +2908,16 @@ static int verify_md5(HEVCContext *s, AVFrame *frame)
 
     return 0;
 }
-
+//解码一帧数据
 static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
                              AVPacket *avpkt)
 {
     int ret;
     HEVCContext *s = avctx->priv_data;
-
+	//没有输入码流的时候，输出解码器中剩余数据
+	//对应“Flush Decoder”功能
     if (!avpkt->size) {
+		//第3个参数flush取值为1
         ret = ff_hevc_output_frame(s, data, 1);
         if (ret < 0)
             return ret;
@@ -2915,6 +2927,7 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
     }
 
     s->ref = NULL;
+	//解码一帧数据
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
     if (ret < 0)
         return ret;
@@ -2945,6 +2958,7 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
     }
 
     if (s->output_frame->buf[0]) {
+		//输出解码后数据
         av_frame_move_ref(data, s->output_frame);
         *got_output = 1;
     }
@@ -2992,7 +3006,7 @@ fail:
     ff_hevc_unref_frame(s, dst, ~0);
     return AVERROR(ENOMEM);
 }
-
+//hevc_decode_free()用于关闭HEVC解码器
 static av_cold int hevc_decode_free(AVCodecContext *avctx)
 {
     HEVCContext       *s = avctx->priv_data;
@@ -3049,7 +3063,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     return 0;
 }
-
+//为HEVCContext中的变量分配内存空间
 static av_cold int hevc_init_context(AVCodecContext *avctx)
 {
     HEVCContext *s = avctx->priv_data;
@@ -3245,16 +3259,16 @@ static int hevc_decode_extradata(HEVCContext *s)
 
     return 0;
 }
-
+//hevc_decode_init()用于初始化HEVC解码器
 static av_cold int hevc_decode_init(AVCodecContext *avctx)
 {
     HEVCContext *s = avctx->priv_data;
     int ret;
-
+	//初始化CABAC
     ff_init_cabac_states();
 
     avctx->internal->allocate_progress = 1;
-
+	//为HEVCContext中的变量分配内存空间
     ret = hevc_init_context(avctx);
     if (ret < 0)
         return ret;
@@ -3267,7 +3281,7 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
         s->threads_number = avctx->thread_count;
     else
         s->threads_number = 1;
-
+	//如果AVCodecContext中包含extradata，则解码之
     if (avctx->extradata_size > 0 && avctx->extradata) {
         ret = hevc_decode_extradata(s);
         if (ret < 0) {

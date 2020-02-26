@@ -228,6 +228,7 @@ int ff_hevc_split_packet(HEVCContext *s, HEVCPacket *pkt, const uint8_t *buf, in
             }
         } else {
             /* search start code */
+		//查找起始码0x000001
             while (buf[0] != 0 || buf[1] != 0 || buf[2] != 1) {
                 ++buf;
                 --length;
@@ -242,7 +243,7 @@ int ff_hevc_split_packet(HEVCContext *s, HEVCPacket *pkt, const uint8_t *buf, in
                     }
                 }
             }
-
+	//找到后，跳过起始码（3Byte）
             buf           += 3;
             length        -= 3;
             extract_length = length;

@@ -138,21 +138,48 @@ static int hevc_find_frame_end(AVCodecParserContext *s, const uint8_t *buf,
 {
     int i;
     ParseContext *pc = s->priv_data;
-
+	//一个一个字节进行处理
     for (i = 0; i < buf_size; i++) {
         int nut;
-
+	 //state64可以存8个字节
+	 //buf[i]存入state64
         pc->state64 = (pc->state64 << 8) | buf[i];
-
+ 	//起始码定义#define START_CODE 0x000001
+ 	//state64右移24bit之后，再对比是否为起始码0x000001
         if (((pc->state64 >> 3 * 8) & 0xFFFFFF) != START_CODE)
             continue;
+        //找到起始码之后
+        /*
+         * 此时state64内容如下：
+         *               |      Start Code    | NALU Header |
+         * |------|------|------|------|------|------|------|------|
+         *
+         *               |  buf |  buf |  buf |  buf |  buf | buf  |
+         *               | [t-5]| [t-4]| [t-3]| [t-2]| [t-1]|  [t] |
+         *
+         * Start Code:
+         * 0x000001
+         *
+         * NALU Header:
+         * forbidden_zero_bit: 1bit。取值0。
+         * nal_unit_type: 6 bit。NALU类型。
+         * nuh_layer_id: 6 bit。目前取值为0（保留以后使用）.
+         * nuh_temporal_id_plus1: 3 bit。减1后为NALU时域层标识号TemporalID。
+         *
+         */
+         //state64右移16bit之后，state64最低字节为起始码后面的1Byte。即为NALU Header的前一个字节
+         //NALU Header的前一个字节中，第1bit为forbidden_zero_bit，取值为0；
+         //2-7bit为nal_unit_type；第8bit为nuh_layer_id，取值为0。
 
+	//在这里state64右移(16+1)bit，然后相与0x3F(00111111)
+	//即得到了nal_unit_type
         nut = (pc->state64 >> 2 * 8 + 1) & 0x3F;
         // Beginning of access unit
         if ((nut >= NAL_VPS && nut <= NAL_AUD) || nut == NAL_SEI_PREFIX ||
             (nut >= 41 && nut <= 44) || (nut >= 48 && nut <= 55)) {
             if (pc->frame_start_found) {
                 pc->frame_start_found = 0;
+		//返回起始码开始位置
                 return i - 5;
             }
         } else if (nut <= NAL_RASL_R ||
@@ -163,6 +190,7 @@ static int hevc_find_frame_end(AVCodecParserContext *s, const uint8_t *buf,
                     pc->frame_start_found = 1;
                 } else { // First slice of next frame found
                     pc->frame_start_found = 0;
+		    //返回起始码开始位置
                     return i - 5;
                 }
             }
@@ -181,6 +209,7 @@ static int hevc_find_frame_end(AVCodecParserContext *s, const uint8_t *buf,
  * @param buf buffer with field/frame data.
  * @param buf_size size of the buffer.
  */
+ //parse_nal_units()用于解析一些NALU（VPS、SPS、PPS）的信息
 static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                            int buf_size, AVCodecContext *avctx)
 {
@@ -376,7 +405,7 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
     return -1;
 }
 #endif
-
+//解析码流
 static int hevc_parse(AVCodecParserContext *s,
                       AVCodecContext *avctx,
                       const uint8_t **poutbuf, int *poutbuf_size,
@@ -385,23 +414,28 @@ static int hevc_parse(AVCodecParserContext *s,
     int next;
     HEVCParserContext *ctx = s->priv_data;
     ParseContext *pc = &ctx->pc;
-
     if (avctx->extradata && !ctx->parsed_extradata) {
         parse_nal_units(s, avctx->extradata, avctx->extradata_size, avctx);
         ctx->parsed_extradata = 1;
     }
-
+	//PARSER_FLAG_COMPLETE_FRAMES为1的时候说明传入的就是完整的1帧数据
+	//这时候不用再分割NALU
+	//PARSER_FLAG_COMPLETE_FRAMES为0的时候说明传入的是任意一段数据
+	//需要先分离出完整的NALU
     if (s->flags & PARSER_FLAG_COMPLETE_FRAMES) {
         next = buf_size;
     } else {
+    	//分割NALU
+    	//通过查找起始码0x000001的方法
         next = hevc_find_frame_end(s, buf, buf_size);
+	//合并
         if (ff_combine_frame(pc, next, &buf, &buf_size) < 0) {
             *poutbuf      = NULL;
             *poutbuf_size = 0;
             return buf_size;
         }
     }
-
+    //解析NALU内容（不解码）
     parse_nal_units(s, buf, buf_size, avctx);
 
     *poutbuf      = buf;

@@ -924,10 +924,14 @@ int avio_open2(AVIOContext **s, const char *filename, int flags,
 {
     URLContext *h;
     int err;
-
+	//ffurl_open()用于初始化URLContext
     err = ffurl_open(&h, filename, flags, int_cb, options);
     if (err < 0)
         return err;
+	//ffio_fdopen()用于根据URLContext初始化AVIOContext
+	//URLContext中包含的URLProtocol完成了具体的协议读写等工作
+	//AVIOContext则是在URLContext的读写函数外面加上了一层“包装”
+	//通过retry_transfer_wrapper()函数
     err = ffio_fdopen(s, h);
     if (err < 0) {
         ffurl_close(h);
