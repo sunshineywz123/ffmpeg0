@@ -267,7 +267,7 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
             if (src_length > 20)
                 src_length = 20;
         }
-
+	//类似于H.264解析器中的ff_h264_decode_nal()
         consumed = ff_hevc_extract_rbsp(NULL, buf, src_length, nal);
         if (consumed < 0)
             return consumed;
@@ -275,19 +275,38 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
         ret = init_get_bits8(gb, nal->data + 2, nal->size);
         if (ret < 0)
             return ret;
-
+        /*
+         * 几种NALU之间的关系
+         *                           +--SS1
+         *                           |
+         *                 +--PPS1<--+
+         *                 |         |
+         *       +--SPS1<--+         +--SS2
+         *       |         |
+         * VPS<--+         +--PPS2
+         *       |
+         *       +--SPS2
+         *
+         */
+        //解析不同种类的NALU
         switch (h->nal_unit_type) {
         case NAL_VPS:
+	    //解析VPS
+           //VPS主要传输视频分级信息，
+           //有利于兼容可分级视频编码以及多视点视频编码
             ff_hevc_decode_nal_vps(gb, avctx, ps);
             break;
         case NAL_SPS:
+	   //解析SPS
             ff_hevc_decode_nal_sps(gb, avctx, ps, 1);
             break;
         case NAL_PPS:
+	    //解析PPS
             ff_hevc_decode_nal_pps(gb, avctx, ps);
             break;
         case NAL_SEI_PREFIX:
         case NAL_SEI_SUFFIX:
+	    //解析SEI
             ff_hevc_decode_nal_sei(h);
             break;
         case NAL_TRAIL_N:
@@ -311,16 +330,19 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                 av_log(avctx, AV_LOG_ERROR, "Invalid NAL unit: %d\n", h->nal_unit_type);
                 return AVERROR_INVALIDDATA;
             }
-
+		//解析 SS Header
+		//按照解码顺序，当前SS是否为第1个SS（Slice Segment）
             sh->first_slice_in_pic_flag = get_bits1(gb);
             s->picture_structure = h->picture_struct;
             s->field_order = h->picture_struct;
 
+		//IRAP, Intra Random Access Point, 随机介入点
+		//包括 IDR, CRA, BLA
             if (IS_IRAP(h)) {
                 s->key_frame = 1;
                 sh->no_output_of_prior_pics_flag = get_bits1(gb);
             }
-
+		//当前Slice引用的PPS的ID号
             sh->pps_id = get_ue_golomb(gb);
             if (sh->pps_id >= MAX_PPS_COUNT || !ps->pps_list[sh->pps_id]) {
                 av_log(avctx, AV_LOG_ERROR, "PPS id out of range: %d\n", sh->pps_id);
@@ -336,10 +358,10 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                 ps->sps = (HEVCSPS*)ps->sps_list[ps->pps->sps_id]->data;
                 ps->vps = (HEVCVPS*)ps->vps_list[ps->sps->vps_id]->data;
             }
-
+		//当前Slice不是第一个SS
             if (!sh->first_slice_in_pic_flag) {
                 int slice_address_length;
-
+		//当前SS是否依赖SS
                 if (ps->pps->dependent_slice_segments_enabled_flag)
                     sh->dependent_slice_segment_flag = get_bits1(gb);
                 else
@@ -347,6 +369,7 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
 
                 slice_address_length = av_ceil_log2_c(ps->sps->ctb_width *
                                                       ps->sps->ctb_height);
+		//当前SS中第一个CTU的地址
                 sh->slice_segment_addr = slice_address_length ? get_bits(gb, slice_address_length) : 0;
                 if (sh->slice_segment_addr >= ps->sps->ctb_width * ps->sps->ctb_height) {
                     av_log(avctx, AV_LOG_ERROR, "Invalid slice segment address: %u.\n",
@@ -354,14 +377,18 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                     return AVERROR_INVALIDDATA;
                 }
             } else
-                sh->dependent_slice_segment_flag = 0;
+                sh->dependent_slice_segment_flag = 0;//独立SS
 
-            if (sh->dependent_slice_segment_flag)
+            if (sh->dependent_slice_segment_flag)//依赖SS
                 break;
 
             for (i = 0; i < ps->pps->num_extra_slice_header_bits; i++)
                 skip_bits(gb, 1); // slice_reserved_undetermined_flag[]
-
+                
+            //slice type定义：
+            //  0: B Slice
+            //  1: P Slice
+            //  2: I Slice
             sh->slice_type = get_ue_golomb(gb);
             if (!(sh->slice_type == I_SLICE || sh->slice_type == P_SLICE ||
                   sh->slice_type == B_SLICE)) {
@@ -380,6 +407,7 @@ static inline int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
                 sh->colour_plane_id = get_bits(gb, 2);
 
             if (!IS_IDR(h)) {
+		//不是IDR，则计算POC
                 sh->pic_order_cnt_lsb = get_bits(gb, ps->sps->log2_max_poc_lsb);
                 s->output_picture_number = h->poc = ff_hevc_compute_poc(h, sh->pic_order_cnt_lsb);
             } else

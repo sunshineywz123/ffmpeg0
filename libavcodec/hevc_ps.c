@@ -820,7 +820,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
     int i;
 
     // Coded parameters
-
+    // 当前引用的VPS的ID
     sps->vps_id = get_bits(gb, 4);
     if (sps->vps_id >= MAX_VPS_COUNT) {
         av_log(avctx, AV_LOG_ERROR, "VPS id out of range: %d\n", sps->vps_id);
@@ -832,7 +832,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
                sps->vps_id);
         return AVERROR_INVALIDDATA;
     }
-
+	//时域子层的最大数目
     sps->max_sub_layers = get_bits(gb, 3) + 1;
     if (sps->max_sub_layers > MAX_SUB_LAYERS) {
         av_log(avctx, AV_LOG_ERROR, "sps_max_sub_layers out of range: %d\n",
@@ -844,31 +844,37 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
 
     if ((ret = parse_ptl(gb, avctx, &sps->ptl, sps->max_sub_layers)) < 0)
         return ret;
-
+    //当前SPS的ID
     *sps_id = get_ue_golomb_long(gb);
     if (*sps_id >= MAX_SPS_COUNT) {
         av_log(avctx, AV_LOG_ERROR, "SPS id out of range: %d\n", *sps_id);
         return AVERROR_INVALIDDATA;
     }
-
+    /*
+	 * chroma_format_idc色度取样格式
+	 * 0: Y
+	 * 1: YUV420P
+	 * 2: YUV422P
+	 * 3: YUV444P
+	 */
     sps->chroma_format_idc = get_ue_golomb_long(gb);
     if (sps->chroma_format_idc > 3U) {
         av_log(avctx, AV_LOG_ERROR, "chroma_format_idc %d is invalid\n", sps->chroma_format_idc);
         return AVERROR_INVALIDDATA;
     }
-
+    //YUV444的时候，标记是否对3个分量单独编码
     if (sps->chroma_format_idc == 3)
         sps->separate_colour_plane_flag = get_bits1(gb);
 
     if (sps->separate_colour_plane_flag)
         sps->chroma_format_idc = 0;
-
+    //宽和高
     sps->width  = get_ue_golomb_long(gb);
     sps->height = get_ue_golomb_long(gb);
     if ((ret = av_image_check_size(sps->width,
                                    sps->height, 0, avctx)) < 0)
         return ret;
-
+	//裁剪相关
     if (get_bits1(gb)) { // pic_conformance_flag
         //TODO: * 2 is only valid for 420
         sps->pic_conf_win.left_offset   = get_ue_golomb_long(gb) * 2;
@@ -892,8 +898,9 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
         }
         sps->output_window = sps->pic_conf_win;
     }
-
+    //亮度像素的颜色位深
     sps->bit_depth   = get_ue_golomb_long(gb) + 8;
+	//色度像素的颜色位深
     bit_depth_chroma = get_ue_golomb_long(gb) + 8;
     if (sps->chroma_format_idc && bit_depth_chroma != sps->bit_depth) {
         av_log(avctx, AV_LOG_ERROR,
@@ -1169,7 +1176,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
 
     return 0;
 }
-
+//解析SPS
 int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps, int apply_defdispwin)
 {
@@ -1183,7 +1190,9 @@ int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
     sps = (HEVCSPS*)sps_buf->data;
 
     av_log(avctx, AV_LOG_DEBUG, "Decoding SPS\n");
-
+	
+    // Coded parameters
+    // 当前引用的VPS的ID
     ret = ff_hevc_parse_sps(sps, gb, &sps_id,
                             apply_defdispwin,
                             ps->vps_list, avctx);
